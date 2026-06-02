@@ -1,4 +1,4 @@
-# pycrack — Intelligent Crack Image Analysis System
+# PyCrackQ — Intelligent Crack Image Analysis System
 
 A desktop GUI application for quantitative analysis of crack patterns in 2D images. Designed for soil desiccation crack research, materials surface inspection, and geological fracture characterization.
 
@@ -67,8 +67,8 @@ Each junction is classified into one of four types:
 - **Rectangular ROI** — batch processing supports crop rectangles
 
 ### Manual Editing
-- Brush-based binary mask editing — paint to add or erase crack pixels
-- Undo/redo support
+- Brush-based binary mask editing — toggle between repair (white) and erase (black) modes
+- Adjustable brush size (1–20 px)
 
 ### Batch Processing
 - Process all images in a folder with consistent parameters
@@ -93,8 +93,8 @@ Each junction is classified into one of four types:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/crack-analysis.git
-cd crack-analysis
+git clone https://github.com/DZ-LT1/PyCrackQ.git
+cd PyCrackQ
 
 # Install dependencies
 pip install -r requirements.txt
@@ -103,13 +103,7 @@ pip install -r requirements.txt
 ### Launch
 
 ```bash
-python -m PyCrack.main
-```
-
-Or from within the project root:
-
-```bash
-python PyPyCrack/main.py
+python main.py
 ```
 
 ## Usage Workflow
@@ -149,7 +143,7 @@ Use the left-side rail buttons or the **Analyze** dropdown menu:
 Results appear in the right-side panel and log window (Ctrl+L).
 
 ### 6. Manual Editing (optional)
-Click **Manual Edit** → paint on the binary mask to add (left-click) or remove (right-click) crack pixels. Useful for touching up misclassified regions.
+Click **Manual Edit** → select Repair or Erase mode → paint on the binary mask to add or remove crack pixels. Useful for touching up misclassified regions.
 
 ### 7. Export
 Click **Export** → choose format (Excel, CSV, PDF, or binary image).
@@ -192,7 +186,7 @@ Following CIAS 2024 recommendations: CI = (J − E + S) / C, where J=junctions, 
 ## Project Structure
 
 ```
-PyCrack/
+PyCrackQ/
 ├── __init__.py           # Package marker
 ├── config.py             # Global constants (thresholds, theme)
 ├── main.py               # GUI application entry point
@@ -246,4 +240,4 @@ If you use this software in your research, please cite the repository.
 
 ---
 
-**pycrack Q** — Quantitative Crack Morphology Analysis
+**PyCrackQ** — Quantitative Crack Morphology Analysis
