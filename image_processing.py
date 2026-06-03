@@ -313,6 +313,21 @@ def _as_gray_uint8(gray_img):
     return img
 
 
+def _downsample_for_recommendation(gray_img, max_side=768):
+    """Return a smaller analysis image plus the scale back to original pixels."""
+    img = _as_gray_uint8(gray_img)
+    h, w = img.shape[:2]
+    longest = max(h, w)
+    if longest <= max_side:
+        return img, 1.0
+
+    scale = max_side / float(longest)
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return resized, 1.0 / scale
+
+
 def _otsu_separability(gray_img):
     hist = np.bincount(gray_img.ravel(), minlength=256).astype(np.float64)
     total = hist.sum()
@@ -336,6 +351,134 @@ def _otsu_separability(gray_img):
     if total_var <= 1e-12:
         return 0.0
     return float(np.max(between) / total_var)
+
+
+def _estimate_crack_width(img_f):
+    """Estimate characteristic crack width from gradient profiles.
+
+    Scans gradient magnitude profiles along horizontal and vertical directions,
+    measuring the typical gap between paired rising/falling edges (which bound
+    a dark crack on brighter soil). Returns estimated crack width in pixels.
+    """
+    h, w = img_f.shape[:2]
+    gx = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(gx ** 2 + gy ** 2)
+
+    edge_threshold = np.percentile(grad_mag, 80)
+    if edge_threshold < 1.0:
+        return 6
+
+    edge_mask = grad_mag > edge_threshold
+    widths = []
+    step = max(1, min(h, w) // 50)
+
+    for r in range(0, h, step):
+        row_edges = np.where(edge_mask[r, :])[0]
+        if len(row_edges) >= 2:
+            gaps = np.diff(row_edges)
+            valid_gaps = gaps[(gaps >= 2) & (gaps <= 60)]
+            widths.extend(valid_gaps.tolist())
+
+    for c in range(0, w, step):
+        col_edges = np.where(edge_mask[:, c])[0]
+        if len(col_edges) >= 2:
+            gaps = np.diff(col_edges)
+            valid_gaps = gaps[(gaps >= 2) & (gaps <= 60)]
+            widths.extend(valid_gaps.tolist())
+
+    if len(widths) < 5:
+        return 6
+    return float(np.median(widths))
+
+
+def _compute_noise_level(img_f):
+    """Estimate high-frequency noise sigma via median-filter residual."""
+    denoised = cv2.medianBlur(img_f.astype(np.uint8), 5).astype(np.float32)
+    return float(np.std(img_f - denoised))
+
+
+def _multi_scale_edge_density(img_f, dynamic_range):
+    """Edge density at fine / medium / coarse gradient thresholds."""
+    gx = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(gx ** 2 + gy ** 2)
+    norm = grad_mag / max(dynamic_range, 1.0)
+    return {
+        "fine": float(np.mean(norm > 0.12)),
+        "medium": float(np.mean(norm > 0.25)),
+        "coarse": float(np.mean(norm > 0.45)),
+    }
+
+
+def _evaluate_candidate(img_f, window, k, method="Sauvola"):
+    """No-reference crack detection quality score.
+
+    Uses connected-component analysis to distinguish crack-like structures
+    (elongated, connected) from scattered noise (compact, isolated).
+    Higher score = cleaner crack detection with less noise.
+    """
+    img_u8 = img_f.astype(np.uint8)
+    try:
+        binary = apply_binarization(img_u8, method, window, k)
+    except Exception:
+        return -1e9
+
+    fg_pixels = cv2.countNonZero(binary)
+    fg_ratio = fg_pixels / binary.size
+
+    # Reject extreme cases
+    if fg_ratio < 0.0005 or fg_ratio > 0.50:
+        return -1e9
+
+    # Connected-component analysis
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        binary, connectivity=8)
+
+    min_area = 15
+    large_components = []
+    noise_pixels = 0
+    for i in range(1, n_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area >= min_area:
+            w_cc = stats[i, cv2.CC_STAT_WIDTH]
+            h_cc = stats[i, cv2.CC_STAT_HEIGHT]
+            aspect = max(w_cc, h_cc) / max(min(w_cc, h_cc), 1)
+            large_components.append((area, aspect))
+        else:
+            noise_pixels += area
+
+    if fg_pixels == 0:
+        return -1e9
+
+    noise_ratio = noise_pixels / fg_pixels
+    crack_pixel_ratio = 1.0 - noise_ratio
+
+    # Elongation score: crack pixels in elongated components
+    if large_components:
+        total_large = sum(a for a, _ in large_components)
+        weighted_elong = sum(a * min(asp, 20) for a, asp in large_components) / total_large
+    else:
+        weighted_elong = 0.0
+
+    # Edge alignment
+    gx = cv2.Sobel(img_f, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(img_f, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(gx ** 2 + gy ** 2)
+    edge_mask = grad_mag > np.percentile(grad_mag, 70)
+    edge_coverage = float(np.mean(binary[edge_mask] > 0)) if np.any(edge_mask) else 0.0
+
+    # Composite score: reward crack-like structure, penalize scattered noise
+    score = (
+        edge_coverage * 4.0
+        + crack_pixel_ratio * 5.0
+        + min(weighted_elong, 8.0) * 0.5
+        - noise_ratio * 6.0
+    )
+    # Bonus for reasonable fg ratio (1-15% for soil cracks)
+    if 0.01 <= fg_ratio <= 0.20:
+        score += 2.0
+    return score
 
 
 def _image_traits(gray_img):
@@ -365,6 +508,10 @@ def _image_traits(gray_img):
     local_var = np.maximum(local_sq_mean - local_mean ** 2, 0)
     texture_score = float(np.mean(np.sqrt(local_var)) / dynamic_range)
 
+    noise_sigma = _compute_noise_level(img_f)
+    crack_width_est = _estimate_crack_width(img_f)
+    ms_edge = _multi_scale_edge_density(img_f, dynamic_range)
+
     if dynamic_range < 35 or std_val < 18:
         contrast_level = "low"
     elif dynamic_range < 80 or std_val < 35:
@@ -388,6 +535,7 @@ def _image_traits(gray_img):
 
     return {
         "image": img,
+        "image_f": img_f,
         "height": h,
         "width": w,
         "short_side": short_side,
@@ -401,96 +549,164 @@ def _image_traits(gray_img):
         "texture_score": texture_score,
         "complexity_level": complexity_level,
         "bimodality_score": _otsu_separability(img),
+        "noise_sigma": noise_sigma,
+        "crack_width_est": crack_width_est,
+        "ms_edge_density": ms_edge,
     }
 
 
 def recommend_parameters(gray_img):
-    """Recommend automatic binarization method, window, and k values.
+    """Recommend binarization method, window size, and k parameter.
 
-    The recommendation uses histogram separability, low-frequency illumination
-    variation, local texture, and edge density. This lets auto mode switch
-    between global and local thresholding, and tune local parameters according
-    to uneven lighting and crack-network complexity.
+    The recommendation runs on a downsampled analysis image for speed, then
+    maps the selected local window back to original-image pixels. It combines
+    image traits with a small no-reference candidate search that rewards
+    crack-like connected structures and penalizes scattered noise.
     """
     if gray_img is None or gray_img.size == 0:
         return {
-            'method': 'Sauvola (Recommended)', 'window': 25, 'k': 0.20,
+            'method': 'Sauvola', 'window': 25, 'k': 0.20,
             'contrast_level': 'medium', 'illumination_level': 'low',
             'complexity_level': 'medium', 'std_dev': 0.0,
             'dynamic_range': 0.0, 'illumination_score': 0.0,
             'edge_density': 0.0, 'texture_score': 0.0,
             'bimodality_score': 0.0, 'reason': 'empty image fallback',
+            'crack_width_est': 0.0, 'noise_sigma': 0.0,
         }
 
-    traits = _image_traits(gray_img)
+    original_img = _as_gray_uint8(gray_img)
+    original_short = max(1, min(original_img.shape[:2]))
+    work_img, scale_to_original = _downsample_for_recommendation(original_img)
+    traits = _image_traits(work_img)
+    img_f = traits["image_f"]
     short_side = traits["short_side"]
     contrast = traits["contrast_level"]
     illumination = traits["illumination_level"]
     complexity = traits["complexity_level"]
     bimodality = traits["bimodality_score"]
+    crack_width = traits["crack_width_est"]
+    noise_sigma = traits["noise_sigma"]
+    ms_edge = traits["ms_edge_density"]
 
-    base_window = _odd_clamped(short_side / 40.0, 15, 35)
-    window = base_window
+    def safe_window(value, low=11, high=75):
+        max_win = max(3, min(high, short_side))
+        if max_win % 2 == 0:
+            max_win -= 1
+        min_win = 3 if max_win < low else low
+        return _odd_clamped(value, min_win, max_win)
 
+    def original_window(value):
+        max_win = max(3, min(95, original_short))
+        if max_win % 2 == 0:
+            max_win -= 1
+        min_win = 3 if max_win < 15 else 15
+        return _odd_clamped(value * scale_to_original, min_win, max_win)
+
+    # Global methods are only preferred when the image is simple enough that
+    # local statistics are unlikely to recover additional crack detail.
+    if (illumination == "low" and bimodality >= 0.78
+            and complexity == "low" and contrast != "low"
+            and ms_edge.get("fine", 0) < 0.08):
+        reason = "uniform illumination and strong bimodal histogram"
+        return {
+            'method': "Otsu",
+            'window': 25, 'k': 0.0,
+            'contrast_level': contrast,
+            'illumination_level': illumination,
+            'complexity_level': complexity,
+            'std_dev': round(traits["std_dev"], 1),
+            'dynamic_range': round(traits["dynamic_range"], 1),
+            'illumination_score': round(traits["illumination_score"], 3),
+            'edge_density': round(traits["edge_density"], 3),
+            'texture_score': round(traits["texture_score"], 3),
+            'bimodality_score': round(bimodality, 3),
+            'crack_width_est': round(crack_width * scale_to_original, 1),
+            'noise_sigma': round(noise_sigma, 1),
+            'reason': reason,
+        }
+
+    if noise_sigma > 15:
+        width_mult = 5.0
+    elif noise_sigma > 8:
+        width_mult = 4.5
+    elif noise_sigma > 4:
+        width_mult = 4.0
+    else:
+        width_mult = 3.5
+
+    base_window = int(round(crack_width * width_mult))
     if illumination == "high":
-        window += 32
+        base_window += 14
     elif illumination == "moderate":
-        window += 26
-
+        base_window += 8
     if contrast == "low":
-        window += 10
+        base_window += 6
     elif contrast == "high":
-        window -= 2
-
+        base_window -= 4
     if complexity == "high":
-        window -= 12
-    elif complexity == "medium":
-        window -= 4
+        base_window = max(7, base_window - 4)
 
-    if traits["texture_score"] > 0.40:
-        window += 8
-
-    window = _odd_clamped(window, 15, 75)
+    window = safe_window(base_window)
 
     k = 0.20
     if illumination == "high":
-        k += 0.08
+        k += 0.06
     elif illumination == "moderate":
-        k += 0.04
-
-    if complexity == "high":
-        k -= 0.06
-    elif complexity == "medium":
-        k -= 0.02
-
+        k += 0.03
     if contrast == "low":
         k -= 0.04
     elif contrast == "high":
         k += 0.02
-
-    if traits["texture_score"] > 0.40:
-        k += 0.04
-
+    if noise_sigma > 15:
+        k += 0.06
+    elif noise_sigma > 8:
+        k += 0.03
+    elif noise_sigma < 3:
+        k -= 0.02
+    if complexity == "high":
+        k -= 0.04
+    elif complexity == "low":
+        k += 0.02
     k = min(0.35, max(0.08, k))
 
-    if illumination == "low" and bimodality >= 0.72 and complexity != "high" and contrast != "low":
-        method = "Otsu"
-        reason = "uniform illumination and strong bimodal histogram"
-        window = 25
-        k = 0.0
-    elif complexity == "high" and contrast == "low" and illumination != "high":
-        method = "Niblack"
-        reason = "fine low-contrast crack network"
-        window = _odd_clamped(min(window, 35), 15, 75)
-        k = min(0.18, max(0.08, k))
-    else:
-        method = "Sauvola (Recommended)"
-        if illumination == "high":
-            reason = "uneven illumination requires local statistics"
-        elif complexity == "high":
-            reason = "complex crack network requires local detail preservation"
-        else:
-            reason = "balanced local thresholding for soil crack texture"
+    method_candidates = ["Sauvola"]
+    if complexity == "high" or contrast == "low":
+        method_candidates.append("Niblack")
+
+    best_score = -1e9
+    best_method = "Sauvola"
+    best_window = window
+    best_k = k
+
+    for method in method_candidates:
+        base_k = k if "Sauvola" in method else min(0.18, max(0.06, k - 0.08))
+        k_low, k_high = ((0.08, 0.35) if "Sauvola" in method else (0.04, 0.22))
+        for dw in (-8, -4, 0, 4, 8):
+            w_cand = safe_window(window + dw)
+            for dk in (-0.04, -0.02, 0.0, 0.02, 0.04):
+                k_cand = min(k_high, max(k_low, base_k + dk))
+                score = _evaluate_candidate(img_f, w_cand, k_cand, method=method)
+                if "Niblack" in method and contrast != "low":
+                    score -= 0.5
+                if score > best_score:
+                    best_score = score
+                    best_method = method
+                    best_window = w_cand
+                    best_k = k_cand
+
+    method = best_method
+    window = original_window(best_window)
+    k = best_k
+
+    parts = [f"{method} selected by crack-structure score"]
+    parts.append(f"crack width ~{crack_width * scale_to_original:.0f}px")
+    if illumination == "high":
+        parts.append("uneven illumination")
+    if noise_sigma > 10:
+        parts.append("noise suppression active")
+    if complexity == "high":
+        parts.append("dense crack network")
+    reason = "; ".join(parts)
 
     return {
         'method': method,
@@ -505,5 +721,7 @@ def recommend_parameters(gray_img):
         'edge_density': round(traits["edge_density"], 3),
         'texture_score': round(traits["texture_score"], 3),
         'bimodality_score': round(bimodality, 3),
+        'crack_width_est': round(crack_width * scale_to_original, 1),
+        'noise_sigma': round(noise_sigma, 1),
         'reason': reason,
     }

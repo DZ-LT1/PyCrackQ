@@ -62,7 +62,7 @@ class BatchSetupWindow(tk.Toplevel):
         self.focus_set()
 
     def _build_variables(self):
-        self.method_var = tk.StringVar(value=self.initial_params.get('method', 'Sauvola (Recommended)'))
+        self.method_var = tk.StringVar(value=self.initial_params.get('method', 'Sauvola'))
         self.window_var = tk.IntVar(value=int(self.initial_params.get('v1', 25)))
         self.k_var = tk.DoubleVar(value=float(self.initial_params.get('v2', 0.2)))
         self.denoise_var = tk.StringVar(value=self.initial_params.get('denoise_mode', 'Median Filter'))
@@ -147,7 +147,7 @@ class BatchSetupWindow(tk.Toplevel):
         self.method_combo = ttk.Combobox(frame, textvariable=self.method_var, state="readonly")
         self.method_combo['values'] = (
             "Global Threshold", "Otsu", "Triangle", "Adaptive Mean",
-            "Adaptive Gaussian", "Sauvola (Recommended)", "Niblack"
+            "Adaptive Gaussian", "Sauvola", "Niblack"
         )
         self.method_combo.bind("<<ComboboxSelected>>", lambda event: self._on_method_change())
         self.method_combo.pack(fill=X, pady=(2, 8))

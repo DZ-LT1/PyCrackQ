@@ -1,243 +1,126 @@
-# PyCrackQ — Intelligent Crack Image Analysis System
+# PyCrackQ
 
-A desktop GUI application for quantitative analysis of crack patterns in 2D images. Designed for soil desiccation crack research, materials surface inspection, and geological fracture characterization.
-
-## Features
-
-### Binarization (7 methods)
-| Method | Type | Best for |
-|--------|------|----------|
-| Sauvola (Recommended) | Local adaptive | Uneven illumination, textured backgrounds |
-| Niblack | Local adaptive | Fine low-contrast crack networks |
-| Otsu | Global automatic | Bimodal histograms with uniform lighting |
-| Triangle | Global automatic | Asymmetric pixel distributions |
-| Global Threshold | Manual | Full user control |
-| Adaptive Mean | Local adaptive | Gradual illumination changes |
-| Adaptive Gaussian | Local adaptive | Sharp illumination gradients |
-
-Auto mode analyzes image statistics (contrast, illumination uniformity, edge density, texture complexity, histogram bimodality) and selects the optimal algorithm and parameters automatically.
-
-### Denoising
-- Median Filter — preserves crack edges while removing salt-and-pepper noise
-- Gaussian Filter — soft smoothing for high-frequency noise
-- Mean Filter — uniform blur for low-resolution images
-- None — passthrough for already clean binary masks
-
-### Morphological Analysis
-- **Skeleton extraction** with spur pruning — topological thinning to 1-pixel-wide crack centerlines
-- **Junction detection** — 4-connectivity analysis identifies branch points from crossing cracks
-- **Crack segmentation** — watershed-based labeling assigns each crack a unique ID
-
-### Quantitative Metrics
-| Metric | Method |
-|--------|--------|
-| Area Ratio | Crack pixel count / total ROI area × 100% |
-| Crack Length | Euclidean skeleton traversal (accurate, not pixel-count) |
-| Average Width | Area / Length (validated against distance-transform mean) |
-| Maximum Width | Maximum distance transform value along the crack mask |
-| Fractal Dimension | Box-counting method with R² goodness-of-fit |
-| Junction Count | Number of branch points (≥3 neighbors, 4-connectivity verified) |
-
-### Orientation & Angles
-- **Rose diagram** — crack segment orientation distribution weighted by segment length
-- **Junction angle analysis** — interactive window to click junction points and measure branch angles with arc visualization
-
-### Soil Clod Analysis
-- Inverts crack mask to identify soil polygons
-- Computes area, perimeter, equivalent diameter, and shape factor for each clod
-- Summary statistics: count, area ratio, mean/median/min/max area, clods per unit area
-
-### Crack Network Connectivity
-Based on graph-theoretic analysis of the crack skeleton:
-- Junction count (J), endpoint count (E), segment count (S), component count (C)
-- Connectivity Index CI = (J − E + S) / C (CIAS 2024 aligned)
-- Network density D = 2S / J(J−1)
-- Euler characteristic x = C − S + J
-
-### Junction Classification
-Each junction is classified into one of four types:
-- **T-type** (3 branches, one angle ≈ 180°) — secondary crack meets primary
-- **Y-type** (3 branches, all angles < 165°) — synchronous cracking
-- **X-type** (4 branches) — two cracks cross
-- **Multi-type** (5+ branches) — complex intersection
-
-### Calibration & ROI
-- **Physical scale calibration** — measure a known distance on the image, all metrics convert to physical units (mm, μm, etc.)
-- **Circular ROI** — restrict analysis to a user-defined circular region
-- **Rectangular ROI** — batch processing supports crop rectangles
-
-### Manual Editing
-- Brush-based binary mask editing — toggle between repair (white) and erase (black) modes
-- Adjustable brush size (1–20 px)
-
-### Batch Processing
-- Process all images in a folder with consistent parameters
-- Configurable output directory and export formats
-- Per-image and summary CSV/Excel output
-
-### Export
-| Format | Content |
-|--------|---------|
-| Excel (.xlsx) | Analysis summary + per-segment metrics |
-| CSV (.csv) | Tabular data for further processing |
-| PDF (.pdf) | Full report with images, metrics, and tables |
-| Binary Image (.png) | Processed binary mask |
+PyCrackQ is a Python-based desktop GUI application for quantitative analysis of soil desiccation-crack images. It provides an integrated workflow for crack segmentation, skeleton extraction, morphological measurement, branch-level analysis, junction classification, soil-clod analysis, batch processing, and result export.
 
 ## Installation
 
-### Prerequisites
-- Python 3.9 or later
-- pip
-
-### Setup
-
 ```bash
-# Clone the repository
 git clone https://github.com/DZ-LT1/PyCrackQ.git
 cd PyCrackQ
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Launch
+## Usage
 
 ```bash
 python main.py
 ```
 
-## Usage Workflow
+### Basic workflow
 
-### 1. Load Image
-Click **Open Image** or use the side panel. Supported formats: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`.
+1. **Open Image** — loads `.jpg`, `.jpeg`, `.png`, `.bmp`, or `.tif` files.
+2. **Calibrate Scale** (optional) — draw a line on a known reference distance and enter its physical length and unit. Metrics are then reported in physical units.
+3. **Select ROI** (optional) — draw a circular region to restrict analysis.
+4. **Adjust Parameters** — choose a binarization method (Sauvola, Niblack, Otsu, Triangle, Global Threshold, Adaptive Mean, Adaptive Gaussian), window size, sensitivity, and denoising filter. Auto mode analyzes image statistics and sets parameters automatically.
+5. **Analyze** — use the rail buttons to run individual analyses.
+6. **Export** — save results as Excel, CSV, PDF, or binary image.
 
-### 2. Calibrate Scale (optional)
-Click **Calibrate Scale** → draw a line on a known reference distance → enter the physical length and unit. All subsequent metrics will be reported in physical units.
-
-### 3. Select ROI (optional)
-Click **Select ROI** → draw a circle on the image to restrict analysis to a circular region. Useful for excluding edge artifacts or focusing on a specific area.
-
-### 4. Adjust Parameters
-- **Algorithm**: Select from the dropdown. Sauvola is recommended for most soil crack images.
-- **Window Size** (slider): Larger windows handle uneven illumination better but lose fine detail. Smaller windows preserve thin cracks but amplify noise.
-- **k parameter** (slider): Sensitivity. Lower values detect more cracks (include noise); higher values are more conservative (miss thin cracks).
-- **Denoising**: Median filter with kernel size 3 is a good default.
-- **Auto mode**: Toggle on to let the system analyze the image and set optimal parameters automatically. Moving any slider manually disables auto mode.
-
-### 5. Analyze
-Use the left-side rail buttons or the **Analyze** dropdown menu:
+### Analysis modules
 
 | Button | Analysis |
 |--------|----------|
 | A | Area Ratio |
 | L | Skeleton Length |
 | W | Average/Max Width |
-| S | Crack Segmentation (IDs each crack) |
+| S | Crack Segmentation |
 | R | Orientation Rose Diagram |
-| F | Fractal Dimension |
+| F | Fractal Dimension (box-counting) |
 | ∠ | Junction Angles (interactive) |
 | C | Soil Clod Analysis |
 | N | Connectivity Graph |
-| J | Junction Types |
+| J | Junction Types (T/Y/X/Multi) |
 
-Results appear in the right-side panel and log window (Ctrl+L).
+### Batch processing
 
-### 6. Manual Editing (optional)
-Click **Manual Edit** → select Repair or Erase mode → paint on the binary mask to add or remove crack pixels. Useful for touching up misclassified regions.
+Click **Batch Process**, select a sample image from the target folder, configure output directory and export formats, then click **Start**. Parameters are inherited from the current UI settings.
 
-### 7. Export
-Click **Export** → choose format (Excel, CSV, PDF, or binary image).
+### Manual editing
 
-## Batch Processing
+Click **Manual Edit** to toggle between repair (white) and erase (black) brush modes on the binary mask. Brush size is adjustable from 1 to 20 px.
 
-1. Click **Batch Process**
-2. Select any sample image from the target folder
-3. Configure batch parameters in the setup window:
-   - **Input directory**: auto-detected from sample image location
-   - **Output directory**: where results are saved
-   - **Processing parameters**: inherited from current UI settings
-   - **ROI options**: crop rectangle or circular mask applied to all images
-   - **Export options**: choose which formats to save per image
-4. Click **Start** to begin processing
+## Analysis methods
 
-Batch processing uses multi-threading — the UI remains responsive during processing. A progress window shows per-image status.
+**Skeleton length** is computed by tracing each connected skeleton component using 8-connectivity traversal. Diagonal steps contribute √2, orthogonal steps contribute 1.
 
-## Analysis Methods — Technical Details
+**Width** is derived from the Euclidean distance transform. At each skeleton pixel, local width = 2 × distance to the nearest crack boundary.
 
-### Skeleton Length Calculation
-Length is computed by tracing each connected skeleton component from endpoint to endpoint using 8-connectivity traversal. Diagonal steps contribute √2; orthogonal steps contribute 1. This is more accurate than simple pixel counting, which overestimates length by ~5-15%.
+**Fractal dimension** uses box-counting with box sizes [2, 3, 4, 6, 8, 12, 16, 32, 64]. The negative slope of log(counts) vs log(sizes) gives D.
 
-### Width Calculation
-Width is derived from the Euclidean distance transform. At each skeleton pixel, the distance to the nearest crack boundary is read from the precomputed distance map. Local width = 2 × distance (radius to diameter). Average width is the mean of these local widths across all skeleton pixels.
+**Junction detection** identifies pixels with ≥ 3 skeleton neighbors in the 3×3 window, where removing the pixel from the local subgraph produces ≥ 3 disconnected components (4-connectivity). Spurs shorter than 5 pixels are pruned before detection.
 
-### Fractal Dimension (Box-Counting)
-The image is recursively divided into boxes of sizes [2, 3, 4, 6, 8, 12, 16, 32, 64]. For each size, the number of boxes containing at least one crack pixel is counted. The negative slope of log(counts) vs log(sizes) gives the fractal dimension D. Typical values: D ≈ 1.0 (linear cracks), D ≈ 1.5-1.8 (complex crack networks), D ≈ 2.0 (space-filling patterns).
+**Connectivity index**: CI = (J − E + S) / C, where J = junctions, E = endpoints, S = segments, C = components.
 
-### Junction Detection
-A pixel is a junction if:
-1. It has ≥ 3 skeleton neighbors in the 3×3 window
-2. Removing it from the local 3×3 subgraph produces ≥ 3 disconnected components (4-connectivity)
+**Junction classification**: each junction is classified as T-type (3 branches, one angle ≈ 180°), Y-type (3 branches, all angles < 165°), X-type (4 branches), or Multi-type (5+ branches).
 
-Spurs shorter than 5 pixels are pruned before detection to reduce noise.
-
-### Connectivity Index (CI)
-Following CIAS 2024 recommendations: CI = (J − E + S) / C, where J=junctions, E=endpoints, S=segments, C=components. Normalized per connected component for comparability across images.
-
-## Project Structure
+## Project structure
 
 ```
 PyCrackQ/
-├── __init__.py           # Package marker
-├── config.py             # Global constants (thresholds, theme)
-├── main.py               # GUI application entry point
-├── image_processing.py   # Binarization, denoising, skeleton, junction detection, auto-parameter
-├── analysis.py           # Metrics, segmentation, fractal dim, connectivity, junction classification
-├── visualization.py      # Plots, charts, image display, zoom/pan
-├── export.py             # Excel/CSV/PDF/binary image export
-├── calibration.py        # Physical scale calibration window
-├── circular_region.py    # Circular ROI selection window
-├── manual_edit.py        # Manual binary mask editing window
-├── batch_processing.py   # Batch processing engine
-├── batch_setup.py        # Batch setup configuration window
-├── batch_options.py      # Batch export options and utilities
-└── requirements.txt      # Python dependencies
+├── main.py               # GUI entry point
+├── config.py              # Global constants
+├── image_processing.py    # Binarization, denoising, skeleton, junction detection
+├── analysis.py            # Metrics, segmentation, fractal dimension, connectivity
+├── visualization.py       # Plots, charts, image display
+├── export.py              # Excel/CSV/PDF/image export
+├── calibration.py         # Physical scale calibration
+├── circular_region.py     # Circular ROI selection
+├── manual_edit.py         # Binary mask editing
+├── batch_processing.py    # Batch processing engine
+├── batch_setup.py         # Batch setup window
+├── batch_options.py       # Batch export utilities
+└── requirements.txt       # Dependencies
 ```
 
 ## Configuration
 
-Edit `config.py` to adjust global defaults:
+Edit `config.py` to adjust defaults:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `THEME_NAME` | `"cosmo"` | ttkbootstrap theme |
-| `MIN_CRACK_AREA` | `20` | Minimum crack area (px²) for noise filtering |
+| `MIN_CRACK_AREA` | `20` | Minimum crack area (px²) |
 | `MIN_CLOD_AREA` | `50` | Minimum soil clod area (px²) |
 | `JUNCTION_THRESH` | `12` | Junction detection sensitivity |
-| `DEFAULT_AUTO_MODE` | `True` | Enable auto parameter recommendation on startup |
+| `DEFAULT_AUTO_MODE` | `True` | Auto parameter mode on startup |
 
 ## Dependencies
 
-| Package | Minimum Version | Purpose |
-|---------|----------------|---------|
-| OpenCV (opencv-python) | 4.8.0 | Image processing, thresholding, morphology, distance transform |
-| NumPy | 1.24.0 | Array operations, statistics |
-| Pandas | 2.0.0 | Data export, batch summary tables |
-| scikit-image | 0.21.0 | Skeletonization, Sauvola/Niblack thresholding, connected components |
-| SciPy | 1.10.0 | Scientific computation |
-| ttkbootstrap | 1.10.0 | Modern themed GUI widgets |
-| Pillow | 9.5.0 | Image I/O, PIL rendering for PDF export |
-| Matplotlib | 3.7.0 | Rose diagrams, histograms, fractal plots |
-| ReportLab | 4.0.0 | PDF report generation |
-| openpyxl | 3.1.0 | Excel file export |
+| Package | Min Version |
+|---------|-------------|
+| opencv-python | 4.8.0 |
+| numpy | 1.24.0 |
+| pandas | 2.0.0 |
+| scikit-image | 0.21.0 |
+| scipy | 1.10.0 |
+| ttkbootstrap | 1.10.0 |
+| Pillow | 9.5.0 |
+| matplotlib | 3.7.0 |
+| reportlab | 4.0.0 |
+| openpyxl | 3.1.0 |
 
 ## License
 
-This project is provided for academic and research purposes. See LICENSE file for details.
+This project is provided for academic and research purposes. See LICENSE for details.
 
 ## Citation
 
-If you use this software in your research, please cite the repository.
+If you use PyCrackQ in your research, please cite the related SoftwareX paper and this repository.
 
----
-
-**PyCrackQ** — Quantitative Crack Morphology Analysis
+```bibtex
+@software{pycrackq_2026,
+  title = {PyCrackQ: A Python-Based Software for Quantitative Analysis of Soil Desiccation-Crack Images},
+  author = {Zhang, Bo and Hu, Feiyang and Zhang, Dexuan and Chen, Xu and Zhu, Zhehao and Duishanalieva Aisin},
+  year = {2026},
+  version = {1.0.0},
+  url = {https://github.com/DZ-LT1/PyCrackQ}
+}

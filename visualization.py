@@ -499,18 +499,18 @@ def show_connectivity_analysis(parent, metrics, skel_bool, vis_info):
 
     ci = metrics['connectivity_index']
     if ci <= 0:
-        level = "Disconnected / fragmentary — cracks do not form a coherent network.\nSuitable for: early-stage cracking, sparse crack studies."
+        level = "Disconnected / fragmentary — cracks do not form a coherent network."
     elif ci <= 5:
-        level = "Moderately connected — partial crack network with some dead ends.\nSuitable for: most desiccation cracking studies."
+        level = "Moderately connected — partial crack network with dead ends."
     elif ci <= 20:
-        level = "Well-connected — mature crack network with many intersections.\nSuitable for: permeability analysis, fluid flow modeling."
+        level = "Well-connected — mature crack network with many intersections."
     else:
-        level = "Highly connected — dense crack network approaching full connectivity.\nSuitable for: fragmentation analysis, soil structure assessment."
+        level = "Highly connected — dense crack network approaching full connectivity."
 
     if metrics['euler_number'] < 0:
-        level += "\n\nNegative Euler number → network has many closed loops (typical for mature desiccation cracks)."
+        level += "\n\nNegative Euler number → network has many closed loops."
     elif metrics['euler_number'] > 0:
-        level += "\n\nPositive Euler number → tree-like structure with few closed loops (typical for early-stage or directional cracks)."
+        level += "\n\nPositive Euler number → tree-like structure with few closed loops."
 
     ttk.Label(interp_frame, text=level, font=("Microsoft YaHei", 9),
               wraplength=400, justify=tk.LEFT).pack(anchor=tk.W)
@@ -599,29 +599,22 @@ def show_junction_classification(parent, result, skel_bool):
     interp_frame.pack(fill=tk.X, pady=(0, 8))
 
     if total == 0:
-        interp = "No junctions found — crack network has no intersections (all isolated segments or single cracks)."
+        interp = "No junctions found."
     else:
         interp = ""
-        # Dominant type analysis
         if T > Y and T > X and T > M:
-            interp += "Dominated by T-type junctions → hierarchical cracking pattern:\n"
-            interp += "primary cracks form first, secondary cracks join perpendicularly.\n"
-            interp += "Typical of directional drying or stress-controlled cracking.\n\n"
+            interp += "Dominated by T-type junctions → hierarchical cracking.\n\n"
         elif Y > T and Y > X and Y > M:
-            interp += "Dominated by Y-type junctions → isotropic cracking pattern:\n"
-            interp += "cracks nucleate simultaneously in multiple directions.\n"
-            interp += "Typical of uniform desiccation with homogeneous soil.\n\n"
+            interp += "Dominated by Y-type junctions → synchronous cracking.\n\n"
         elif X > T and X > Y and X > M:
-            interp += "Dominated by X-type junctions → crossing crack pattern:\n"
-            interp += "two preferential crack directions intersect.\n"
-            interp += "May indicate sequential cracking episodes or multiple stress directions.\n\n"
+            interp += "Dominated by X-type junctions → crossing cracks.\n\n"
 
         if T > 0 and Y > 0:
             ratio = T / max(Y, 1)
             if ratio > 2:
-                interp += f"T/Y ratio = {ratio:.1f} → strongly hierarchical network.\n"
+                interp += f"T/Y ratio = {ratio:.1f}\n"
             elif ratio < 0.5:
-                interp += f"T/Y ratio = {ratio:.1f} → predominantly synchronous cracking.\n"
+                interp += f"T/Y ratio = {ratio:.1f}\n"
 
     ttk.Label(interp_frame, text=interp, font=("Microsoft YaHei", 9),
               wraplength=400, justify=tk.LEFT).pack(anchor=tk.W)

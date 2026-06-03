@@ -73,7 +73,7 @@ class CreateToolTip:
 class BinarizationApp(ttk.Window):
     def __init__(self):
         super().__init__(themename=THEME_NAME)
-        self.title("Intelligent Crack Analysis and Detection System")
+        self.title("PyCrackQ")
         self.geometry("1920x950")
 
         self.cv_image = None
@@ -119,13 +119,17 @@ class BinarizationApp(ttk.Window):
         self.setup_ui()
 
     def init_variables(self):
-        self.algo_var = ttk.StringVar(value="Sauvola (Recommended)")
+        self.algo_var = ttk.StringVar(value="Sauvola")
         self.scale1_var = ttk.IntVar(value=25)
         self.scale2_var = ttk.DoubleVar(value=0.2)
         self.denoise_var = ttk.StringVar(value="Median Filter")
         self.denoise_k_var = ttk.IntVar(value=3)
         self.auto_mode_var = tk.IntVar(value=1 if DEFAULT_AUTO_MODE else 0)
         self._setting_auto_params = False  # Flag to prevent auto-disable during programmatic updates
+        self._auto_recommendation_token = 0
+        self._fractal_progress_win = None
+        self._fractal_progress_bar = None
+        self._fractal_progress_label = None
 
     def setup_custom_styles(self):
         style = ttk.Style()
@@ -204,18 +208,12 @@ class BinarizationApp(ttk.Window):
             pass
         style.configure(custom_lf_style, font=("Microsoft YaHei", 10, "bold"), borderwidth=2, relief="groove")
 
-        base_btn_style = "TButton"
-        for tag in ["Primary", "Success", "Warning", "Danger", "Info", "Secondary", "Light", "Dark"]:
+        for tag in ["Primary", "Success", "Warning", "Secondary"]:
             custom_btn_style = f"3D.{tag}.TButton"
-            try:
-                if not style.layout(custom_btn_style):
-                    style.layout(custom_btn_style, style.layout(base_btn_style))
-            except:
-                pass
             style.configure(custom_btn_style, font=("Microsoft YaHei", 9, "bold"), borderwidth=3, relief="raised", padding=8)
 
     def setup_ui(self):
-        self.title("Crack Analysis")
+        self.title("PyCrackQ")
         c = self.ui_colors
         # Log buffer (hidden; open with Ctrl+L)
         self._log_buffer = []
@@ -368,7 +366,7 @@ class BinarizationApp(ttk.Window):
                                         font=("Microsoft YaHei", 9), bootstyle="success")
         self.algo_combo['values'] = (
             "Global Threshold", "Otsu", "Triangle", "Adaptive Mean", "Adaptive Gaussian",
-            "Sauvola (Recommended)", "Niblack")
+            "Sauvola", "Niblack")
         self.algo_combo.bind("<<ComboboxSelected>>", self.on_algo_change)
         self.algo_combo.pack(fill=X, pady=(0, 8))
 
@@ -673,7 +671,7 @@ class BinarizationApp(ttk.Window):
         self._debounce_binarize_id = None
         self._start_binarization_thread()
 
-    def _start_binarization_thread(self):
+    def _start_binarization_thread(self, use_auto=True):
         """Collect parameters on main thread, then launch background worker."""
         if self.cv_image is None:
             self._set_busy(False)
@@ -681,9 +679,9 @@ class BinarizationApp(ttk.Window):
 
         self._set_busy(True)
 
-        # Apply auto parameter recommendation if enabled (must happen on main thread).
-        if self.auto_mode_var.get():
-            self._apply_auto_params()
+        if use_auto and self.auto_mode_var.get():
+            self._start_auto_recommendation_thread()
+            return
 
         # Read all tkinter variables on the main thread.
         params = {
@@ -710,6 +708,52 @@ class BinarizationApp(ttk.Window):
         t = threading.Thread(target=self._run_binarization_thread,
                              args=(params,), daemon=True)
         t.start()
+
+    def _start_auto_recommendation_thread(self):
+        """Run automatic parameter recommendation off the UI thread."""
+        if self.cv_image is None:
+            self._set_busy(False)
+            return
+
+        self._auto_recommendation_token += 1
+        token = self._auto_recommendation_token
+        image_id = id(self.cv_image)
+        img = self.cv_image.copy()
+        self._status_var.set("Analyzing image parameters...")
+
+        t = threading.Thread(
+            target=self._run_auto_recommendation_thread,
+            args=(img, image_id, token),
+            daemon=True,
+        )
+        t.start()
+
+    def _run_auto_recommendation_thread(self, img, image_id, token):
+        try:
+            params = recommend_parameters(img)
+            self.after(0, lambda: self._on_auto_recommendation_complete(
+                params, image_id, token))
+        except Exception as e:
+            error_msg = str(e)
+            self.after(0, lambda: self._on_auto_recommendation_error(error_msg, token))
+
+    def _on_auto_recommendation_complete(self, params, image_id, token):
+        if token != self._auto_recommendation_token:
+            return
+        if self.cv_image is None or id(self.cv_image) != image_id:
+            return
+        if not self.auto_mode_var.get():
+            self._set_busy(False)
+            return
+
+        self._apply_auto_params(params)
+        self._start_binarization_thread(use_auto=False)
+
+    def _on_auto_recommendation_error(self, error_msg, token):
+        if token != self._auto_recommendation_token:
+            return
+        self.log(f"Auto param analysis failed: {error_msg}")
+        self._set_busy(False)
 
     def _run_binarization_thread(self, params):
         """Background processing — no tkinter access allowed here."""
@@ -742,7 +786,8 @@ class BinarizationApp(ttk.Window):
                 binary, final, method, v1, v2, log_msgs))
 
         except Exception as e:
-            self.after(0, lambda: self._on_binarization_error(str(e)))
+            error_msg = str(e)
+            self.after(0, lambda: self._on_binarization_error(error_msg))
 
     def _on_binarization_complete(self, binary, final, method, v1, v2, log_msgs):
         """Called on main thread after background processing succeeds."""
@@ -795,16 +840,8 @@ class BinarizationApp(ttk.Window):
 
     # Auto parameter recommendation
 
-    def _apply_auto_params(self):
-        """Analyze current image and set optimal binarization parameters."""
-        if self.cv_image is None:
-            return
-        try:
-            params = recommend_parameters(self.cv_image)
-        except Exception as e:
-            self.log(f"Auto param analysis failed: {e}")
-            return
-
+    def _apply_auto_params(self, params):
+        """Apply precomputed automatic binarization parameters to the UI."""
         self._setting_auto_params = True
         try:
             self.algo_var.set(params['method'])
@@ -818,22 +855,17 @@ class BinarizationApp(ttk.Window):
         self.scale1_val.config(text=str(params['window']))
         self.scale2_val.config(text=f"{params['k']:.2f}")
 
-        # Update info label
+        # Build concise info label
+        illumination = params.get('illumination_level', '?')
+        complexity = params.get('complexity_level', '?')
+        crack_w = params.get('crack_width_est', '?')
+        noise_s = params.get('noise_sigma', '?')
         self.auto_info_label.config(
             text=f"Auto: {params['method']}, win={params['window']}, "
-                 f"k={params['k']:.2f} ({params['contrast_level']} contrast, "
-                 f"σ={params['std_dev']})"
+                 f"k={params['k']:.2f} | crack~{crack_w}px, "
+                 f"noise~{noise_s} sigma, {illumination} light, {complexity} cracks"
         )
-
-        illumination = params.get('illumination_level', 'unknown')
-        complexity = params.get('complexity_level', 'unknown')
-        contrast = params.get('contrast_level', 'unknown')
         reason = params.get('reason', '')
-        self.auto_info_label.config(
-            text=f"Auto: {params['method']}, win={params['window']}, "
-                 f"k={params['k']:.2f} ({illumination} light, "
-                 f"{complexity} cracks, {contrast} contrast, std={params['std_dev']})"
-        )
         if reason:
             self.log(f"Auto recommendation: {reason}")
 
@@ -1038,32 +1070,123 @@ class BinarizationApp(ttk.Window):
             messagebox.showwarning("Notice", "Please process the image first")
             return
         self.log("Calculating fractal dimension (Box-Counting Method)...")
-        pixels = (self.binary_image > 0)
-        sizes, counts = get_fractal_dim(pixels)
+        source = self.binary_image if self.binary_image is not None else self.final_image
+        pixels = (source > 0).copy()
+        self._open_fractal_progress_window()
+        self._start_fractal_dimension_thread(pixels)
 
-        if not sizes or not counts or len(sizes) < 2:
+    def _open_fractal_progress_window(self):
+        if self._fractal_progress_win is not None:
+            try:
+                if self._fractal_progress_win.winfo_exists():
+                    self._fractal_progress_win.destroy()
+            except tk.TclError:
+                pass
+
+        win = tk.Toplevel(self)
+        win.title("Fractal Dimension")
+        win.geometry("360x120")
+        win.resizable(False, False)
+        win.protocol("WM_DELETE_WINDOW", lambda: None)
+        ttk.Label(win, text="Fractal dimension progress", padding=(12, 10, 12, 4)).pack(fill=X)
+        self._fractal_progress_label = ttk.Label(
+            win, text="Preparing box-counting...", padding=(12, 0, 12, 4)
+        )
+        self._fractal_progress_label.pack(fill=X)
+        self._fractal_progress_bar = ttk.Progressbar(
+            win, maximum=1, value=0, mode="determinate"
+        )
+        self._fractal_progress_bar.pack(fill=X, padx=12, pady=(2, 12))
+        self._fractal_progress_win = win
+
+    def _start_fractal_dimension_thread(self, pixels):
+        t = threading.Thread(
+            target=self._run_fractal_dimension_thread,
+            args=(pixels,),
+            daemon=True,
+        )
+        t.start()
+
+    def _run_fractal_dimension_thread(self, pixels):
+        def progress(step, total, box_size, count):
+            self.after(0, lambda: self._on_fractal_progress(
+                step, total, box_size, count))
+
+        try:
+            sizes, counts = get_fractal_dim(pixels, progress_callback=progress)
+            if not sizes or not counts or len(sizes) < 2:
+                result = {"error": "too_small"}
+            elif any(c == 0 for c in counts):
+                result = {"error": "invalid_distribution"}
+            else:
+                coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
+                fractal_dim = -coeffs[0]
+                fit_log_counts = np.polyval(coeffs, np.log(sizes))
+                y_bar = np.mean(np.log(counts))
+                ss_tot = np.sum((np.log(counts) - y_bar) ** 2)
+                ss_res = np.sum((np.log(counts) - fit_log_counts) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                result = {
+                    "sizes": sizes,
+                    "counts": counts,
+                    "coeffs": coeffs,
+                    "fractal_dim": fractal_dim,
+                    "r_squared": r_squared,
+                }
+            self.after(0, lambda: self._on_fractal_dimension_complete(result))
+        except Exception as e:
+            error_msg = str(e)
+            self.after(0, lambda: self._on_fractal_dimension_error(error_msg))
+
+    def _on_fractal_progress(self, step, total, box_size, count):
+        if self._fractal_progress_bar is not None:
+            self._fractal_progress_bar.configure(maximum=max(total, 1))
+            self._fractal_progress_bar["value"] = step
+        if self._fractal_progress_label is not None:
+            self._fractal_progress_label.config(
+                text=f"Fractal dimension progress: {step}/{total}, box={box_size}, count={count}"
+            )
+        self._status_var.set(f"Fractal dimension progress: {step}/{total}")
+
+    def _close_fractal_progress_window(self):
+        if self._fractal_progress_win is not None:
+            try:
+                if self._fractal_progress_win.winfo_exists():
+                    self._fractal_progress_win.destroy()
+            except tk.TclError:
+                pass
+        self._fractal_progress_win = None
+        self._fractal_progress_bar = None
+        self._fractal_progress_label = None
+        self._update_status()
+
+    def _on_fractal_dimension_complete(self, result):
+        self._close_fractal_progress_window()
+        if result.get("error") == "too_small":
             self.log("Image is too small to calculate fractal dimension")
             messagebox.showwarning("Notice", "Image is too small to calculate fractal dimension\nAt least a 4x4 pixel area is required")
             return
-
-        if any(c == 0 for c in counts):
+        if result.get("error") == "invalid_distribution":
             self.log("Crack area is too small or irregularly distributed; cannot calculate fractal dimension")
             messagebox.showwarning("Notice", "Crack area is too small or irregularly distributed\nCannot calculate a valid fractal dimension")
             return
 
-        coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
-        fractal_dim = -coeffs[0]
-        fit_log_counts = np.polyval(coeffs, np.log(sizes))
-        y_bar = np.mean(np.log(counts))
-        ss_tot = np.sum((np.log(counts) - y_bar)**2)
-        ss_res = np.sum((np.log(counts) - fit_log_counts)**2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        sizes = result["sizes"]
+        counts = result["counts"]
+        coeffs = result["coeffs"]
+        fractal_dim = result["fractal_dim"]
+        r_squared = result["r_squared"]
         self.analysis_data["Fractal Dimension"] = round(fractal_dim, 4)
         self.analysis_data["Fractal Fit R2"] = round(r_squared, 4)
         self.log(f"Fractal Dimension D = {fractal_dim:.4f} (R2 = {r_squared:.4f})")
         self._set_result("Fractal Dim", f"{fractal_dim:.4f}")
-        self._set_result("Fractal R²", f"{r_squared:.4f}")
+        self._set_result("Fractal R2", f"{r_squared:.4f}")
         show_fractal_plot(self, sizes, counts, coeffs, fractal_dim, r_squared)
+
+    def _on_fractal_dimension_error(self, error_msg):
+        self._close_fractal_progress_window()
+        self.log(f"Fractal dimension error: {error_msg}")
+        messagebox.showerror("Error", error_msg)
 
     # Junction angle analysis
 
@@ -1744,7 +1867,7 @@ class BinarizationApp(ttk.Window):
             self.canvas_view = ZoomableImageFrame(self._canvas_frame, cv_img, max_display_size=800)
             self.canvas_view.pack(fill=BOTH, expand=YES)
         if target in self._thumb_buttons:
-            self._thumb_images[target] = cv_img.copy()
+            self._thumb_images[target] = cv_img
             if self._current_view is None:
                 self._switch_view(target)
             elif self._current_view == target:
@@ -1763,7 +1886,7 @@ class BinarizationApp(ttk.Window):
             self.p2_frame.pack(fill=X, pady=5)
             self.p1_label.config(text="Window Size:")
             self.scale2.config(from_=0.0, to=1.0)
-            self.scale2_var.set(0.2 if "Sauvola" in method else 0.8)
+            self.scale2_var.set(0.2 if "Sauvola" in method else 0.12)
             self.scale2_val.config(text=f"{self.scale2_var.get():.2f}")
         elif "Adaptive" in method:
             self.p2_frame.pack(fill=X, pady=5)
@@ -1797,7 +1920,9 @@ class BinarizationApp(ttk.Window):
         self.denoise_k_val.config(text=str(k))
         self._schedule_denoising()
 
-
-if __name__ == "__main__":
+def main():
     app = BinarizationApp()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()

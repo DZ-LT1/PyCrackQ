@@ -241,7 +241,7 @@ def calculate_segment_metrics(binary_mask, skel_bool, dist_map=None, scale_facto
     }
 
 
-def get_fractal_dim(Z):
+def get_fractal_dim(Z, progress_callback=None):
     h, w = Z.shape
     p = min(h, w)
 
@@ -254,7 +254,8 @@ def get_fractal_dim(Z):
     box_sizes = [2, 3, 4, 6, 8, 12, 16, 32, 64]
     box_sizes = [s for s in box_sizes if s <= min(h, w)]
 
-    for box_size in box_sizes:
+    total_steps = len(box_sizes)
+    for step, box_size in enumerate(box_sizes, start=1):
         if box_size < 2 or box_size > p:
             continue
 
@@ -270,6 +271,8 @@ def get_fractal_dim(Z):
         if count > 0:
             sizes.append(box_size)
             counts.append(count)
+        if progress_callback is not None:
+            progress_callback(step, total_steps, box_size, count)
 
     if len(sizes) < 3:
         return [], []
@@ -525,7 +528,7 @@ def analyze_crack_connectivity(skel_bool):
     """Compute crack network connectivity metrics from a skeleton.
 
     Converts the skeleton to a graph, counting junctions, endpoints, segments,
-    and connected components. Derives CIAS 2024-aligned connectivity metrics.
+    and connected components. Derives connectivity metrics from the graph.
 
     Args:
         skel_bool: Boolean 2D array, True = skeleton pixel.
@@ -604,7 +607,6 @@ def analyze_crack_connectivity(skel_bool):
     # Here: x = C - S + J (connected components - segments + junctions)
     euler_number = component_count - segment_count + junction_count
 
-    # Connectivity Index (CIAS 2024 aligned)
     # CI = (J - E + S) / C, normalized per connected component
     if component_count > 0:
         connectivity_index = (junction_count - endpoint_count + segment_count) / component_count
