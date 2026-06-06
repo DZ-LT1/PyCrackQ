@@ -66,24 +66,30 @@ Click **Manual Edit** to toggle between repair (white) and erase (black) brush m
 
 ```
 PyCrackQ/
-├── main.py               # GUI entry point
-├── config.py              # Global constants
-├── image_processing.py    # Binarization, denoising, skeleton, junction detection
-├── analysis.py            # Metrics, segmentation, fractal dimension, connectivity
-├── visualization.py       # Plots, charts, image display
-├── export.py              # Excel/CSV/PDF/image export
-├── calibration.py         # Physical scale calibration
-├── circular_region.py     # Circular ROI selection
-├── manual_edit.py         # Binary mask editing
-├── batch_processing.py    # Batch processing engine
-├── batch_setup.py         # Batch setup window
-├── batch_options.py       # Batch export utilities
-└── requirements.txt       # Dependencies
+|-- main.py                   # Source-checkout launcher
+|-- src/
+|   `-- PyCrackQ/             # Application source package
+|       |-- main.py           # GUI entry point
+|       |-- config.py         # Global constants
+|       |-- image_processing.py
+|       |-- analysis.py
+|       |-- visualization.py
+|       |-- export.py
+|       |-- calibration.py
+|       |-- circular_region.py
+|       |-- manual_edit.py
+|       |-- batch_processing.py
+|       |-- batch_setup.py
+|       `-- batch_options.py
+|-- Examples/                  # Example images and reference results
+|-- docs/tutorial.md           # Installation and reproduction tutorial
+|-- requirements.txt           # Dependencies
+`-- LICENSE.txt
 ```
 
 ## Configuration
 
-Edit `config.py` to adjust defaults:
+Edit `src/PyCrackQ/config.py` to adjust defaults:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -110,7 +116,7 @@ Edit `config.py` to adjust defaults:
 
 ## License
 
-This project is provided for academic and research purposes. See LICENSE for details.
+This project is provided for academic and research purposes. See LICENSE.txt for details.
 
 ## Citation
 
