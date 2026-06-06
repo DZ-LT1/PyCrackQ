@@ -121,6 +121,6 @@ If you use PyCrackQ in your research, please cite the related SoftwareX paper an
   title = {PyCrackQ: A Python-Based Software for Quantitative Analysis of Soil Desiccation-Crack Images},
   author = {Zhang, Bo and Hu, Feiyang and Zhang, Dexuan and Chen, Xu and Zhu, Zhehao and Duishanalieva Aisin},
   year = {2026},
-  version = {1.0.0},
+  version = {1.0.1},
   url = {https://github.com/DZ-LT1/PyCrackQ}
 }
